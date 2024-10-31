@@ -34,7 +34,7 @@ class PartiallyObservableFrozenLake(gym.Env):
         # get the agent's current position
         x, y = self.agent_position
 
-        # 3x3 observation array
+        # 3x3 observation 
         observation = []
 
         # go from -1 to 1 (3 rows)
@@ -73,7 +73,9 @@ class PartiallyObservableFrozenLake(gym.Env):
             action (int): 0-left, 1-down, 2-right, 3-up
 
         Returns:
-            ...
+            [[int]]: a 3x3 array representing the observed state of the environment surrounding the agent.
+            float: the reward for the action taken
+            done: whether or not the episode terminates as a result of the action (i.e., the agent falls in a hole)
         """
 
         # take the step
@@ -112,7 +114,7 @@ if __name__ == "__main__":
     
     for action in [1, 2, 1, 2, 1, 2, 2, 1, 2, 1, 1, 1, 2, 2]:
         observation, reward, done = env.step(action)
-        print(f"Action: {action}, Observation:\n{np.array(observation)}\n")
+        print(f"Action: {action}, Observation:\n{np.array(observation)}, Reward: {reward}, Done: {done}")
         
         time.sleep(2)
 
