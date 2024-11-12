@@ -23,7 +23,8 @@ class PartiallyObservableFrozenLake(gym.Env):
         self.lake_size = lake_size
         self.render_mode = render_mode
         self.agent_position = (0, 0)
-
+        self.goal_state = (lake_size-1, lake_size-1)
+        
     def get_observation(self):
         """Observes the 3x3 grid surrounding the agent and returns it.
 
@@ -54,16 +55,16 @@ class PartiallyObservableFrozenLake(gym.Env):
 
                     # append to the current row
                     if state == b'H': row.append(1)    # 1 for hole
-                    elif state == b'G': row.append(2)  # 2 for goal
+                    elif state == b'G': row.append(2)  # 2 for goal (treasure)
                     else: row.append(0)                # 0 otherwise
 
                 # if this location is out-of-bounds, append None to the row
                 else:
-                    row.append(None)
+                    row.append(-1)
 
             # append the row to the observation
             observation.append(row)
-
+f
         return observation
         
     def step(self, action):
@@ -80,10 +81,10 @@ class PartiallyObservableFrozenLake(gym.Env):
 
         # take the step
         state, reward, done, _, _ = self.env.step(action)
-
+            
         # update agent position based on state
         self.agent_position = divmod(state, self.lake_size)
-    
+        
         # render window with the new state, if applicable
         if self.render_mode is not None:
             self.render()
@@ -91,13 +92,19 @@ class PartiallyObservableFrozenLake(gym.Env):
         return self.get_observation(), reward, done
         
     def reset(self):
-        """Resets the simulation environment to its starting state."""
+        """Resets the simulation environment to its starting state.
+
+        Returns:
+            [[int]]: a 3x3 array representing the observed state of the environment surrounding the agent.
+        """
 
         # save agent's position as top left
         self.agent_position = (0, 0)
 
         # reset environment
         self.env.reset()
+
+        return self.get_observation()
         
     def render(self):
         """Renders the simulation window."""
@@ -106,18 +113,5 @@ class PartiallyObservableFrozenLake(gym.Env):
     def close(self):
         """Closes the simulation window."""
         self.env.close()
-        
-if __name__ == "__main__":
-    env = PartiallyObservableFrozenLake(render_mode="human")
-    env.reset()
-    env.render()
-    
-    for action in [1, 2, 1, 2, 1, 2, 2, 1, 2, 1, 1, 1, 2, 2]:
-        observation, reward, done = env.step(action)
-        print(f"Action: {action}, Observation:\n{np.array(observation)}, Reward: {reward}, Done: {done}")
-        
-        time.sleep(2)
 
-    time.sleep(30)
-    env.close()
     
