@@ -2,12 +2,14 @@ import numpy as np
 import gymnasium as gym
 import time
 
+from gymnasium.envs.toy_text.frozen_lake import generate_random_map
+
 class PartiallyObservableFrozenLake(gym.Env):
     """This class implements a "partially observable" frozen lake.
     That is, it implements a frozen lake simulation where the agent
     can only "see" the 3x3 grid of cells at which it is centered. """
     
-    def __init__(self, lake_size=8, is_slippery=False, render_mode=None):
+    def __init__(self, lake_size=8, is_slippery=False, render_mode=None, randomize=False):
         """Initializes the simulation environment.
 
         Args:
@@ -16,14 +18,30 @@ class PartiallyObservableFrozenLake(gym.Env):
             render_mode (string): For our purposes, either "human" (render a visible window) or None (don't render a window).
         """
 
-        # initialize the simulation environment using the arguments
-        self.env = gym.make("FrozenLake-v1", map_name=f"{lake_size}x{lake_size}", is_slippery=is_slippery, render_mode=render_mode)
-
         # save arguments for later
         self.lake_size = lake_size
+        self.is_slippery = is_slippery
         self.render_mode = render_mode
+        self.randomize = randomize
+        
         self.agent_position = (0, 0)
         self.goal_state = (lake_size-1, lake_size-1)
+
+        # initialize the simulation environment using the arguments
+        if randomize:
+            self.initialize_random_layout()
+        else:
+            self.env = gym.make("FrozenLake-v1", map_name=f"{lake_size}x{lake_size}", is_slippery=is_slippery, render_mode=render_mode)
+
+    def initialize_random_layout(self):
+        """Initializes frozen lake environment with random layout. NOTE: randomize must be True to use this function!"""
+
+        # ensure randomize is True
+        assert self.randomize, "Cannot initialize random layout in environment with randomize=False!"
+
+        # create random map and initialize environment using the map
+        random_map = generate_random_map(size=self.lake_size, p=0.8)
+        self.env = gym.make("FrozenLake-v1", desc=random_map, is_slippery=self.is_slippery, render_mode=self.render_mode)
         
     def get_observation(self):
         """Observes the 3x3 grid surrounding the agent and returns it.
@@ -64,7 +82,7 @@ class PartiallyObservableFrozenLake(gym.Env):
 
             # append the row to the observation
             observation.append(row)
-f
+
         return observation
         
     def step(self, action):
@@ -113,5 +131,19 @@ f
     def close(self):
         """Closes the simulation window."""
         self.env.close()
+
+if __name__ == "__main__":
+    """Main function for playing around with the environment. Not really used for anything in the project."""
+    
+    env = PartiallyObservableFrozenLake(render_mode="human", randomize=True)
+
+    for i in range(5):
+        env.reset()
+        env.render()
+        time.sleep(5)
+        env.initialize_random_layout()
+    
+    env.close()
+
 
     
