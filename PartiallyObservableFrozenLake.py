@@ -1,6 +1,7 @@
 import numpy as np
 import gymnasium as gym
 import time
+import random
 
 from gymnasium.envs.toy_text.frozen_lake import generate_random_map
 
@@ -9,7 +10,7 @@ class PartiallyObservableFrozenLake(gym.Env):
     That is, it implements a frozen lake simulation where the agent
     can only "see" the 3x3 grid of cells at which it is centered. """
     
-    def __init__(self, lake_size=8, is_slippery=False, render_mode=None, randomize=False):
+    def __init__(self, lake_size=8, desc=None, is_slippery=False, render_mode=None, custom_reward=False):
         """Initializes the simulation environment.
 
         Args:
@@ -22,27 +23,65 @@ class PartiallyObservableFrozenLake(gym.Env):
         self.lake_size = lake_size
         self.is_slippery = is_slippery
         self.render_mode = render_mode
-        self.randomize = randomize
+        self.custom_reward = custom_reward
         
         self.agent_position = (0, 0)
         self.goal_state = (lake_size-1, lake_size-1)
+        self.n_steps = 0
 
         # initialize the simulation environment using the arguments
-        if randomize:
-            self.initialize_random_layout()
-        else:
-            self.env = gym.make("FrozenLake-v1", map_name=f"{lake_size}x{lake_size}", is_slippery=is_slippery, render_mode=render_mode)
+        self.env = gym.make("FrozenLake-v1", desc=desc, map_name=None, is_slippery=is_slippery, render_mode=render_mode)
 
     def initialize_random_layout(self):
-        """Initializes frozen lake environment with random layout. NOTE: randomize must be True to use this function!"""
-
-        # ensure randomize is True
-        assert self.randomize, "Cannot initialize random layout in environment with randomize=False!"
-
-        # create random map and initialize environment using the map
-        random_map = generate_random_map(size=self.lake_size, p=0.8)
+        """Initializes frozen lake environment with random layout."""
+        random_map = generate_random_map(size=self.lake_size, p=0.9)
         self.env = gym.make("FrozenLake-v1", desc=random_map, is_slippery=self.is_slippery, render_mode=self.render_mode)
+
+    def isCloser(self, current_position, prev_position):
+        goal_x, goal_y = self.goal_state
+        curr_x, curr_y = self.agent_position
+        prev_x, prev_y = prev_position
+
+        distance_to_goal = abs(goal_x - curr_x) + abs(goal_y - curr_y)
+        prev_distance_to_goal = abs(goal_x - prev_x) + abs(goal_y - prev_y)
+
+        return distance_to_goal < prev_distance_to_goal
+
+    def customize_reward(self, prev_position, reward, done):
+        """Augments Frozen Lake's default reward (1 for goal, 0 for everything else). This custom reward
+        returns 1 if the goal is reached, -1 if the agent falls in a hole, a distance-based pentalty otherwise.
+
+        Args:
+            reward (int): The reward returned by default in Frozen Lake (either 0 or 1).
+            done (boolean): True if the agent has fallen in a hole, False otherwise.
+            
+        Returns:
+            float: The augmented reward.
+        """
         
+        # goal state
+        if reward == 1:
+            new_reward = 10
+
+        # hole states
+        elif reward == 0 and done:
+            new_reward = -5
+
+        # if the agent gets closer to the goal
+        elif self.isCloser(self.agent_position, prev_position):
+            # use manhattan distance to encourage movement towards goal
+            goal_x, goal_y = self.goal_state
+            curr_x, curr_y = self.agent_position
+
+            distance_to_goal = abs(goal_x - curr_x) + abs(goal_y - curr_y)
+            new_reward = 1 / (distance_to_goal + 0.1)
+
+        # the agent gets farther away from the goal
+        else:
+            new_reward = -0.1 * self.n_steps
+                
+        return new_reward           
+               
     def get_observation(self):
         """Observes the 3x3 grid surrounding the agent and returns it.
 
@@ -99,10 +138,16 @@ class PartiallyObservableFrozenLake(gym.Env):
 
         # take the step
         state, reward, done, _, _ = self.env.step(action)
-            
-        # update agent position based on state
-        self.agent_position = divmod(state, self.lake_size)
+        self.n_steps += 1
         
+        # update agent position based on state
+        prev_position = self.agent_position
+        self.agent_position = divmod(state, self.lake_size)
+
+        # modify reward if custom_reward is True
+        if self.custom_reward:
+            reward = self.customize_reward(prev_position, reward, done)
+            
         # render window with the new state, if applicable
         if self.render_mode is not None:
             self.render()
@@ -122,6 +167,9 @@ class PartiallyObservableFrozenLake(gym.Env):
         # reset environment
         self.env.reset()
 
+        # reset number of steps
+        self.n_steps = 0
+
         return self.get_observation()
         
     def render(self):
@@ -135,14 +183,20 @@ class PartiallyObservableFrozenLake(gym.Env):
 if __name__ == "__main__":
     """Main function for playing around with the environment. Not really used for anything in the project."""
     
-    env = PartiallyObservableFrozenLake(render_mode="human", randomize=True)
-
-    for i in range(5):
-        env.reset()
-        env.render()
-        time.sleep(5)
+    env = PartiallyObservableFrozenLake(render_mode="human", custom_reward=True)
+    for lo in range(10):
         env.initialize_random_layout()
-    
+        env.reset()
+
+        done = False
+        
+        while not done:
+            action = random.randint(0,3)
+            obs, reward, done = env.step(action)
+            env.render()
+
+            print(env.agent_position, reward)
+        
     env.close()
 
 

@@ -1,5 +1,6 @@
 import time
 import sys
+import random
 
 import torch
 import torch.nn as nn
@@ -16,8 +17,9 @@ ACTION_DIM = 4                  # output dimension of the actor network (number 
 LEARNING_RATE = 1e-3            # optimizer learning rate
 GAMMA = 0.99                    # discount factor
 
-MAX_STEPS_PER_EPISODE = 100     # maximum number of steps allowed before episode resets
+MAX_STEPS_PER_EPISODE = 30     # maximum number of steps allowed before episode resets
 EPISODE_AVERAGE = 10            # the number of past episodes to average over when computing results
+EARLY_STOP_SUCCESSES = 80       # the minimum number of successes needed to stop early on a given layout
     
 class Actor(nn.Module):
     """This class defines the "actor" portion of the Actor-Critic method.
@@ -30,8 +32,9 @@ class Actor(nn.Module):
         The second layer maps the latent representation to a probability distribution over the action space."""
         
         super(Actor, self).__init__()
-        self.fc1 = nn.Linear(INPUT_DIM, HIDDEN_DIM)     # first fully connected layer (observability window -> hidden representation)
-        self.fc2 = nn.Linear(HIDDEN_DIM, ACTION_DIM)    # second fully connected layer (hidden representation -> action distribution)
+        self.fc1 = nn.Linear(INPUT_DIM, HIDDEN_DIM)         # first fully connected layer (observability window -> hidden representation)
+        self.fc2 = nn.Linear(HIDDEN_DIM, HIDDEN_DIM // 2)   # second fully connected layer (hidden representation -> hidden representation)
+        self.fc3 = nn.Linear(HIDDEN_DIM // 2, ACTION_DIM)   # third fully connected layer (hidden representation -> action distribution)
 
     def forward(self, x):
         """Propagates the input observability window through the two network layers,
@@ -43,12 +46,15 @@ class Actor(nn.Module):
         Returns:
             torch.tensor(torch.float32): The Actor's probability distribution over the action space.
         """
-
+        
         # send the observability window (x) through the first layer, using ReLU as nonlinearity
         x = torch.relu(self.fc1(x))
 
-        # send the hidden representation through the second layer and perform softmax to produce a probability distribution
-        return torch.softmax(self.fc2(x), dim=-1)
+        # send the hidden representation through the second layer
+        x = torch.relu(self.fc2(x))
+
+        # send the second hidden representation through the third layer and perform softmax to produce a probability distribution
+        return torch.softmax(self.fc3(x), dim=-1)
 
 class Critic(nn.Module):
     """This class defines the "critic" portion of the Actor-Critic method.
@@ -62,8 +68,9 @@ class Critic(nn.Module):
         The second layer maps the latent representation to a scalar estimate of the value of the given state."""
         
         super(Critic, self).__init__()
-        self.fc1 = nn.Linear(INPUT_DIM, HIDDEN_DIM)     # first fully connected layer (observability window -> hidden representation)
-        self.fc2 = nn.Linear(HIDDEN_DIM, 1)             # second fully connected layer (hidden representation -> scalar value estimate)
+        self.fc1 = nn.Linear(INPUT_DIM, HIDDEN_DIM)         # first fully connected layer (observability window -> hidden representation)
+        self.fc2 = nn.Linear(HIDDEN_DIM, HIDDEN_DIM // 2)   # second fully connected layer (hidden representation -> hidden representation)
+        self.fc3 = nn.Linear(HIDDEN_DIM // 2, 1)            # third fully connected layer (hidden representation -> scalar value estimate)
 
     def forward(self, x):
         """Propagates the input observability window through the two network layers,
@@ -79,9 +86,11 @@ class Critic(nn.Module):
         # send the observability window (x) through the first layer, using ReLU as nonlinearity
         x = torch.relu(self.fc1(x))
 
-        # send the hidden representation through the second layer to produce the value estimate
-        return self.fc2(x)
+        # send the hidden representation through the second layer
+        x = torch.relu(self.fc2(x))
 
+        # send the second hidden representation through the third layer and perform softmax to produce a probability distribution
+        return self.fc3(x)
 
 def preprocess_observation(observation):
     """Processes an observation before it can be passed through the Actor/Critic networks.
@@ -171,9 +180,15 @@ def train_actor_critic_static(env, actor, critic, actor_optimizer, critic_optimi
             total_reward += reward
             steps += 1
 
-        # optional: print out episode reward every 100 episodes
-        if episode % 100 == 0:
-            print(f"Episode {episode}/{num_episodes}, Total Reward: {total_reward}")
+        if episode >= 100:
+            start = episode - 100
+            avg_reward = sum(ep_rewards[start:episode]) / (episode - start)
+            n_successes = sum(ep_successes[start:episode])
+                
+            # optional: print out episode reward every 100 episodes
+            if episode % 100 == 0:
+                print(f"\tEpisodes {start}-{episode}, Average Reward: {avg_reward}")
+                # print(f"Episode {episode}/{episodes_per_layout}, Total Reward: {total_reward}")
 
         # log accumulated reward, successes, steps, actor loss, and critic loss for this episode
         ep_rewards.append(total_reward)
@@ -355,9 +370,9 @@ def plot_avg_results(results_dict):
 
 
 
-def train_actor_critic_static(env, actor, critic, actor_optimizer, critic_optimizer, num_episodes=1000):
-    """The training function used during the first phase of the project (before the progress report).
-    This function trains an agent to learn a static environment (i.e., one where the layout is not changing).
+def train_actor_critic_dynamic(env, actor, critic, actor_optimizer, critic_optimizer, num_layouts=10, episodes_per_layout=1000):
+    """The training function used during the second phase of the project (after the progress report).
+    This function trains an agent to learn a dynamic environment (i.e., one where the layout is changing).
 
     Args:
         env (PartiallyObsevableFrozenLake): The environment for the simulation
@@ -371,71 +386,101 @@ def train_actor_critic_static(env, actor, critic, actor_optimizer, critic_optimi
         {string: [float]}: A dictionary containing various performance metrics gathered during training
     """
     
-    ep_rewards = []         # per-episode accumulated rewards
-    ep_successes = []       # per-episode number of successes
-    ep_actor_losses = []    # per-episode accumulated actor loss
-    ep_critic_losses = []   # per-episode accumulated critic loss
-    ep_n_steps = []         # per-episode number of steps taken
+    for layout in range(num_layouts):
+        print(f"* ======================= LAYOUT {layout} ======================= *")
 
-    
-    for episode in range(num_episodes):
-        # reset the environment, process the initial observation so that it can be passed through networks
-        observation = preprocess_observation(env.reset())
+        ep_rewards = []         # per-episode accumulated rewards
+        ep_successes = []       # per-episode number of successes
+        ep_actor_losses = []    # per-episode accumulated actor loss
+        ep_critic_losses = []   # per-episode accumulated critic loss
+        ep_n_steps = []         # per-episode number of steps taken
 
-        done = False        # indicates whether this episode is finished
-        steps = 0           # tracks steps taken in this episode
-        total_reward = 0    # tracks accumulated reward in this episode
+        # initialize a new random layout
+        env.initialize_random_layout()
 
-        # keep iterating until the agent falls in a hole, reaches the reward, or exceeds the maximum number of steps
-        while not done and steps < MAX_STEPS_PER_EPISODE:
-
-            # get the action probabilities from the actor, use to sample an action
-            action_probs = actor(observation)
-            action = torch.multinomial(action_probs, 1).item()
-
-            # perform the sampled action, get next observation and reward
-            next_observation, reward, done = env.step(action)
-            next_observation = preprocess_observation(next_observation)
-
-            # use the critic to estimate the value of the current and next states
-            value = critic(observation)
-            next_value = critic(next_observation) if not done else 0
-
-            # compute the target value, error between the target value and the estimated value of current state
-            td_target = reward + GAMMA * next_value
-            td_error = td_target - value
-
-            # update actor and critic networks
-            critic_loss = td_error.pow(2)
-            actor_loss = -torch.log(action_probs[action]) * td_error.detach()
-
-            # zeor actor gradients, backpropagate actor loss, update actor parameters
-            actor_optimizer.zero_grad()
-            actor_loss.backward()
-            actor_optimizer.step()
+        epsilon = 1.0                   # initial exploration rate
+        epsilon_min = 0.1               # minimum exploration rate
+        epsilon_decay = 0.995           # epsilon decay rate
+        
+        stop_early = False      # set to True if the average reward over 100 episodes exceeds 0.8
+        for episode in range(episodes_per_layout):
+            if stop_early:
+                break
             
-            # zeor critic gradients, backpropagate critic loss, update critic parameters
-            critic_optimizer.zero_grad()
-            critic_loss.backward()
-            critic_optimizer.step()
+            # reset the environment, process the initial observation so that it can be passed through networks
+            observation = preprocess_observation(env.reset())
 
-            # move to next state
-            observation = next_observation
+            done = False        # indicates whether this episode is finished
+            steps = 0           # tracks steps taken in this episode
+            total_reward = 0    # tracks accumulated reward in this episode
 
-            # accumulate rewards and steps
-            total_reward += reward
-            steps += 1
+            # keep iterating until the agent falls in a hole, reaches the reward, or exceeds the maximum number of steps
+            while not done and steps < MAX_STEPS_PER_EPISODE:
 
-        # optional: print out episode reward every 100 episodes
-        if episode % 100 == 0:
-            print(f"Episode {episode}/{num_episodes}, Total Reward: {total_reward}")
+                # get the action probabilities from the actor, use to sample an action
+                action_probs = actor(observation)
+                action = torch.argmax(action_probs).item()
 
-        # log accumulated reward, successes, steps, actor loss, and critic loss for this episode
-        ep_rewards.append(total_reward)
-        ep_successes.append(1 if env.agent_position == env.goal_state else 0)
-        ep_n_steps.append(steps)
-        ep_actor_losses.append(actor_loss.detach())
-        ep_critic_losses.append(critic_loss.detach())
+##                if random.random() < epsilon:
+##                    action = random.randint(0, 3)
+##                else:
+##                    action = torch.argmax(action_probs).item()
+##                epsilon = max(epsilon_min, epsilon_decay * epsilon)
+
+                # perform the sampled action, get next observation and reward
+                next_observation, reward, done = env.step(action)                    
+                next_observation = preprocess_observation(next_observation)
+
+                # use the critic to estimate the value of the current and next states
+                value = critic(observation)
+                next_value = critic(next_observation) if not done else 0
+
+                # compute the target value, error between the target value and the estimated value of current state
+                td_target = reward + GAMMA * next_value
+                td_error = td_target - value
+
+                # update actor and critic networks
+                critic_loss = td_error.pow(2)
+                actor_loss = -torch.log(action_probs[action]) * td_error.detach()
+
+                # zeor actor gradients, backpropagate actor loss, update actor parameters
+                actor_optimizer.zero_grad()
+                actor_loss.backward()
+                actor_optimizer.step()
+                
+                # zeor critic gradients, backpropagate critic loss, update critic parameters
+                critic_optimizer.zero_grad()
+                critic_loss.backward()
+                critic_optimizer.step()
+
+                # move to next state
+                observation = next_observation
+
+                # accumulate rewards and steps
+                total_reward += reward
+                steps += 1
+
+            # log accumulated reward, successes, steps, actor loss, and critic loss for this episode
+            ep_rewards.append(total_reward)
+            ep_successes.append(1 if env.agent_position == env.goal_state else 0)
+            ep_n_steps.append(steps)
+            ep_actor_losses.append(actor_loss.detach())
+            ep_critic_losses.append(critic_loss.detach())
+
+            # early stopping
+            if episode >= 100:
+                start = episode - 100
+                avg_reward = sum(ep_rewards[start:episode]) / (episode - start)
+                n_successes = sum(ep_successes[start:episode])
+                
+                # print out episode reward every 100 episodes
+                if episode % 100 == 0:
+                    print(f"\tEpisodes {start}-{episode}, Average Reward: {avg_reward}")
+
+                # if the number of successes over the last 100 episodes exceeds 80, stop early
+                if n_successes > EARLY_STOP_SUCCESSES:
+                    print(f"\t\t{n_successes}/{100} over the last 100 episodes. Stopping early.")
+                    stop_early = True
 
     # aggregate performance metric lists into a dictionary and return
     results = {
@@ -461,23 +506,41 @@ if __name__ == "__main__":
 
     # static environment case (i.e., layout does not change)
     if sys.argv[1].lower() == "static":
-        train_env = PartiallyObservableFrozenLake()
-        test_env = PartiallyObservableFrozenLake(render_mode="human")
+        # initialize environment
+        train_env = PartiallyObservableFrozenLake(is_slippery=False, custom_reward=True)
+        test_env = PartiallyObservableFrozenLake(is_slippery=False, desc=train_env.env.unwrapped.desc, render_mode="human")
         
+        # initialize actor and critic networks
         actor = Actor()
         critic = Critic()
-        
+
+        # initialize optimizers
         actor_optimizer = optim.Adam(actor.parameters(), lr=LEARNING_RATE)
         critic_optimizer = optim.Adam(critic.parameters(), lr=LEARNING_RATE)
 
+        # train the agent, collect the performance results
         results = train_actor_critic_static(train_env, actor, critic, actor_optimizer, critic_optimizer, num_episodes=1000)
+        test_actor_critic_static(test_env, actor, num_episodes=1, render = True)
         
+        # display the results
         plot_raw_results(results)
         plot_avg_results(results)
 
     # dynamic environment case (i.e., layout does change)
     elif sys.argv[1].lower() == "dynamic":
-        print("Dynamic!")
+        # initialize environment
+        train_env = PartiallyObservableFrozenLake(is_slippery=False, custom_reward=True)
+        
+        # initialize actor and critic networks
+        actor = Actor()
+        critic = Critic()
+
+        # initialize optimizers
+        actor_optimizer = optim.Adam(actor.parameters(), lr=LEARNING_RATE)
+        critic_optimizer = optim.Adam(critic.parameters(), lr=LEARNING_RATE)
+
+        # train the agent, collect the performance results
+        results = train_actor_critic_dynamic(train_env, actor, critic, actor_optimizer, critic_optimizer, num_layouts=10, episodes_per_layout=1000)
 
     # any other input is not acceptable
     else:
