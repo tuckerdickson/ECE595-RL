@@ -251,7 +251,7 @@ def test_actor_critic_static(env, actor, num_episodes=10, render = False):
             steps += 1
             observation = next_observation
 
-def plot_raw_results(results_dict):
+def plot_raw_results(results):
     """Plots five performance metrics (total rewards per episode, success per episode, steps taken per episode,
     actor loss per episode, and critic loss per episode) accumulated over a training run.
 
@@ -370,7 +370,7 @@ def plot_avg_results(results_dict):
 
 
 
-def train_actor_critic_dynamic(env, actor, critic, actor_optimizer, critic_optimizer, num_layouts=10, episodes_per_layout=1000):
+def train_actor_critic_dynamic(env, actor, critic, actor_optimizer, critic_optimizer, num_layouts=10, episodes_per_layout=1000, show_results=False):
     """The training function used during the second phase of the project (after the progress report).
     This function trains an agent to learn a dynamic environment (i.e., one where the layout is changing).
 
@@ -385,7 +385,7 @@ def train_actor_critic_dynamic(env, actor, critic, actor_optimizer, critic_optim
     Returns:
         {string: [float]}: A dictionary containing various performance metrics gathered during training
     """
-    
+
     for layout in range(num_layouts):
         print(f"* ======================= LAYOUT {layout} ======================= *")
 
@@ -478,19 +478,121 @@ def train_actor_critic_dynamic(env, actor, critic, actor_optimizer, critic_optim
                     print(f"\tEpisodes {start}-{episode}, Average Reward: {avg_reward}")
 
                 # if the number of successes over the last 100 episodes exceeds 80, stop early
-                if n_successes > EARLY_STOP_SUCCESSES:
-                    print(f"\t\t{n_successes}/{100} over the last 100 episodes. Stopping early.")
-                    stop_early = True
+##                if n_successes > EARLY_STOP_SUCCESSES:
+##                    print(f"\t\t{n_successes}/{100} over the last 100 episodes. Stopping early.")
+##                    stop_early = True
 
-    # aggregate performance metric lists into a dictionary and return
-    results = {
-        "ep_rewards": ep_rewards,
-        "ep_successes": ep_successes,
-        "ep_n_steps": ep_n_steps,
-        "ep_actor_losses": ep_actor_losses,
-        "ep_critic_losses": ep_critic_losses
-    }
-    return results
+        # aggregate performance metric lists into a dictionary and return
+        result_dict = {
+            "ep_rewards": ep_rewards,
+            "ep_successes": ep_successes,
+            "ep_n_steps": ep_n_steps,
+            "ep_actor_losses": ep_actor_losses,
+            "ep_critic_losses": ep_critic_losses
+        }
+
+        # plot the results
+        if show_results:
+            plot_avg_results_dynamic(result_dict)
+
+def test_actor_critic_dynamic(env, actor, num_layouts=100, episodes_per_layout=100):
+    """The testing function used during the second phase of the project (after the progress report).
+    This function tests an agent's ability to navigate unseen environments. 
+
+    Args:
+        env (PartiallyObsevableFrozenLake): The environment for the simulation
+        actor (Actor): The actor network
+        num_episodes (int): The number of episodes to test for
+        render (boolean): True to render a simulation window, False otherwise
+    """
+    
+    test_rewards = []
+    test_success_rates = []
+
+    for lo in range(num_layouts):
+        
+        rewards = []
+        total_successes = 0
+        env.initialize_random_layout()
+        
+        for episode in range(episodes_per_layout):
+            
+            observation = preprocess_observation(env.reset())
+            total_reward = 0
+            done = False
+            
+            while not done:
+                
+                action_probs = actor(observation)
+                action = torch.multinomial(action_probs, 1).item()
+                
+                next_observation, reward, done = env.step(action)
+                observation = preprocess_observation(next_observation)
+                
+                total_reward += reward
+                if reward == 10:
+                    total_successes += 1
+                
+            rewards.append(total_reward)
+
+        test_rewards.append(np.mean(rewards))
+        test_success_rates.append(total_successes / episodes_per_layout)
+
+    print("Test Rewards Per Layout:", test_rewards)
+    print("Test Success Rates Per Layout:", test_success_rates)
+
+def plot_avg_results_dynamic(results_dict):
+    """Plots three performance metrics (average rewards, average success, average steps taken),
+    each averaged over the EPISODE_AVERAGE previous
+    episodes during a training run. In other words, the ith value displayed is the average of the
+    values of episodes [i-EPISODE_AVERAGE...i]. One corner case is the first EPISODE_AVERAGE
+    episodes. Here, we just average the current episode and all previous episodes.
+
+    This method results in much smoother graphs compared to plotting the raw values at each episode.
+
+    Args:
+        results_dict ({string: [float]}): A dictionary containing the per-episode performance metrics for a training run
+    """
+
+    # keeps track of the average metrics over the past EPISODE_AVERAGE number of episodes
+    avg_rewards = []
+    avg_successes = []
+    avg_steps = []
+
+    # compute the average performance metrics for each episode
+    for idx in range(1, len(results_dict["ep_rewards"])):
+        start = max(0, idx - EPISODE_AVERAGE)   # index for the earliest episode to consider when averaging
+        divisor = min(EPISODE_AVERAGE, idx)     # divisor to use when computing the averages
+
+        # compute averages and append to lists
+        avg_rewards.append(sum(results_dict["ep_rewards"][start:idx]) / divisor)
+        avg_successes.append(sum(results_dict["ep_successes"][start:idx]) / divisor)
+        avg_steps.append(sum(results_dict["ep_n_steps"][start:idx]) / divisor)
+
+    # display results on a 2x3 subplot
+    fig, axs = plt.subplots(1,3)
+
+    # plot averaged rewards per episode
+    axs[0].plot(avg_rewards)
+    axs[0].set_xlabel('Episode')
+    axs[0].set_ylabel('Average Reward')
+    axs[0].set_title(f'Average Reward Over Prior {EPISODE_AVERAGE} Episodes')
+
+    # plot averaged successes per episode
+    axs[1].plot(avg_successes)
+    axs[1].set_xlabel('Episode')
+    axs[1].set_ylabel('Average Success')
+    axs[1].set_title(f'Average Success Over Prior {EPISODE_AVERAGE} Episodes')
+
+    # plot averaged steps taken per episode
+    axs[2].plot(avg_steps)
+    axs[2].set_xlabel('Episode')
+    axs[2].set_ylabel('Average Steps')
+    axs[2].set_title(f'Average Steps Over Prior {EPISODE_AVERAGE} Episodes')
+
+    # format subplot and display
+    plt.tight_layout()
+    plt.show()
 
 
 
@@ -530,6 +632,7 @@ if __name__ == "__main__":
     elif sys.argv[1].lower() == "dynamic":
         # initialize environment
         train_env = PartiallyObservableFrozenLake(is_slippery=False, custom_reward=True)
+        test_env = PartiallyObservableFrozenLake(is_slippery=False, custom_reward=True)
         
         # initialize actor and critic networks
         actor = Actor()
@@ -540,8 +643,9 @@ if __name__ == "__main__":
         critic_optimizer = optim.Adam(critic.parameters(), lr=LEARNING_RATE)
 
         # train the agent, collect the performance results
-        results = train_actor_critic_dynamic(train_env, actor, critic, actor_optimizer, critic_optimizer, num_layouts=10, episodes_per_layout=1000)
-
+        train_actor_critic_dynamic(train_env, actor, critic, actor_optimizer, critic_optimizer, num_layouts=10, episodes_per_layout=1000, show_results=True)
+        test_actor_critic_dynamic(test_env, actor)
+        
     # any other input is not acceptable
     else:
         print(error_message)
