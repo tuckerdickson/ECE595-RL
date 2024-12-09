@@ -107,10 +107,10 @@ class DQNAgent:
         self.target_network = DeepQNetwork(state_size, action_size).to(self.device)
         self.target_network.load_state_dict(self.q_network.state_dict())
         
-        # optimizer and Loss
+        # optimizer and loss
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
         
-        # replay Buffer
+        # replay buffer
         self.replay_buffer = ReplayBuffer(capacity=100000, state_size=state_size)
         
         # hyperparameters
