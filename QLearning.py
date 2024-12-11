@@ -8,7 +8,7 @@ class PartiallyObservableFrozenLake(gym.Env):
     That is, it implements a frozen lake simulation where the agent
     can only "see" the 3x3 grid of cells at which it is centered. """
     
-    def __init__(self, lake_size=4, is_slippery=False, render_mode=None):
+    def __init__(self, lake_size=8, is_slippery=False, render_mode=None):
         """Initializes the simulation environment.
 
         Args:
@@ -112,12 +112,12 @@ class PartiallyObservableFrozenLake(gym.Env):
     def close(self):
         """Closes the simulation window."""
         self.env.close()
-        
+
 def run(episodes, max_steps_per_episode=100, is_training=True, render=False):
     env = PartiallyObservableFrozenLake(render_mode='human' if render else None)
     initial_observation = env.reset()
 
-    q = np.zeros((env.env.observation_space.n, env.env.action_space.n))  # Initialize Q-table
+    q = np.zeros((env.env.observation_space.n, env.env.action_space.n))  
 
     learning_rate_a = 0.9  # Alpha or learning rate
     discount_factor_g = 0.9  # Gamma or discount rate
@@ -126,17 +126,18 @@ def run(episodes, max_steps_per_episode=100, is_training=True, render=False):
     rng = np.random.default_rng()  # Random number generator
 
     rewards_per_episode = np.zeros(episodes)
+    steps_per_episode = np.zeros(episodes)  
 
     for i in range(episodes):
-        print(f"Episode {i+1}/{episodes}")  # Print episode number
+        print(f"Episode {i+1}/{episodes}") 
         observation = env.reset()
-        state = env.env.unwrapped.s  # Get the current state index from the environment
+        state = env.env.unwrapped.s  
         terminated = False
         total_reward = 0
         steps = 0
 
         while not terminated and steps < max_steps_per_episode:
-            print(f"Observation at step {steps}:\n{np.array(observation)}\n")
+           # print(f"Observation at step {steps}:\n{np.array(observation)}\n")
             if is_training and rng.random() < epsilon:
                 action = env.env.action_space.sample()
             else:
@@ -144,7 +145,7 @@ def run(episodes, max_steps_per_episode=100, is_training=True, render=False):
 
             new_observation, reward, terminated = env.step(action)
 
-            new_state = env.env.unwrapped.s  # Get the current state index from the environment
+            new_state = env.env.unwrapped.s  
 
             if is_training:
                 q[state, action] += learning_rate_a * (
@@ -156,27 +157,44 @@ def run(episodes, max_steps_per_episode=100, is_training=True, render=False):
             total_reward += reward
             steps += 1
 
-        print(f"Observation at final step {steps}:\n{np.array(observation)}")
+        #print(f"Observation at final step {steps}:\n{np.array(observation)}")
         epsilon = max(epsilon - epsilon_decay_rate, 0)
 
         if epsilon == 0:
             learning_rate_a = 0.0001
 
         rewards_per_episode[i] = total_reward
+        steps_per_episode[i] = steps  
         print(f"Reward for Episode {i+1}: {total_reward}")
 
     print("\nQ-table:")
     print("Actions: [Left, Down, Right, Up]")
     for state in range(q.shape[0]):
-        print(f"State {state}: {q[state]}")  # Print Q-table with each state number listed
+        print(f"State {state}: {q[state]}")  
 
     env.close()
 
+   
     sum_rewards = np.zeros(episodes)
+    avg_steps = np.zeros(episodes)
     for t in range(episodes):
         sum_rewards[t] = np.sum(rewards_per_episode[max(0, t - 100):(t + 1)])
+        avg_steps[t] = np.mean(steps_per_episode[max(0, t - 100):(t + 1)])  
+
+    plt.figure()
     plt.plot(sum_rewards)
-    plt.savefig('frozen_lake_partial_observation.png')
+    plt.title("Sum of Rewards over 100 Episodes vs Episodes")
+    plt.xlabel("Episodes")
+    plt.ylabel("Sum of Rewards in the last 100 Episodes")
+    plt.savefig('frozen_lake_partial_observation_rewards.png')
+
+    plt.figure()
+    plt.plot(avg_steps)
+    plt.title("Average Steps over 100 Episodes vs Episodes")
+    plt.xlabel("Episodes")
+    plt.ylabel("Average Steps in the last 100 Episodes")
+    plt.savefig('frozen_lake_partial_observation_steps.png')
+
 
 if __name__ == '__main__':
-    run(episodes=10000, max_steps_per_episode=30, is_training=True, render=False)
+    run(episodes=10000, max_steps_per_episode=100, is_training=True, render=False)
