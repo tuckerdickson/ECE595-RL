@@ -29,6 +29,8 @@ cd ECE595-RL
 2. Run the script for the desired algorithm
 ```
 python3 DQN.py
+python3 ActorCritic.py dynamic
+python3 QLearning.py
 ```
 
 ## Contact
