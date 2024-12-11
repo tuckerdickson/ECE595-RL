@@ -26,7 +26,19 @@ This scenario models real-world challenges, where autonomous agents—such as ro
 git clone https://github.com/tuckerdickson/ECE595-RL.git
 cd ECE595-RL
 ```
-2. Run the script for the desired algorithm
+2. Create a new conda environment from the provided `environment.yml` file
+```
+conda env create -f environment.yml
+```
+3. Activate the environment
+```
+conda activate ece595rl
+```
+4. If using requirements.txt
+```
+pip install -r requirements.txt
+```
+5. Run the script for the desired algorithm
 ```
 python3 DQN.py
 python3 ActorCritic.py dynamic
